@@ -50,13 +50,6 @@ def extract_score(u: dict) -> int:
                     pass
     return 0
 
-def get_sheet_id(sheet_name):
-    spreadsheet = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
-    for s in spreadsheet['sheets']:
-        if s['properties']['title'] == sheet_name:
-            return s['properties']['sheetId']
-    return None
-
 def create_sheet(sheet_name):
     requests_body = {
         "requests": [{
@@ -102,14 +95,27 @@ def prepare_data_for_sheet(users):
         rows.append([u['rank'], u['displayname'], u['score']])
     return rows
 
+def assign_ranks(users):
+    users_sorted = sorted(users, key=lambda x: x['score'], reverse=True)
+    prev_score = None
+    prev_rank = 0
+    for idx, user in enumerate(users_sorted, start=1):
+        if user['score'] != prev_score:
+            prev_rank = idx
+            prev_score = user['score']
+        user['rank'] = prev_rank
+    return users_sorted
+
 def fetch_leaderboard():
     base_url = "https://api.kap.gg/games/leaderboard/doubloons/"
     types = ["piracy", "governance"]
     limit = 50
-    all_users_map = {}
+
+    all_users_map = {}      # Для общего листа
+    type_users_map = {"piracy": [], "governance": []}  # Для отдельных листов
 
     try:
-        # Сбор всех пользователей
+        # Собираем данные по каждой категории
         for lb_type in types:
             offset = 0
             while True:
@@ -128,6 +134,8 @@ def fetch_leaderboard():
                     if not name:
                         continue
                     norm_name = normalize_username(name)
+
+                    # Для общего листа
                     if norm_name in all_users_map:
                         all_users_map[norm_name]['score'] += score
                     else:
@@ -135,30 +143,47 @@ def fetch_leaderboard():
                             "displayname": name,
                             "score": score
                         }
+
+                    # Для отдельного листа
+                    type_users_map[lb_type].append({
+                        "displayname": name,
+                        "score": score
+                    })
+
                 if len(users) < limit:
                     break
                 offset += limit
                 time.sleep(0.2)
 
-        # Сортировка и ранжирование
-        all_users = sorted(all_users_map.values(), key=lambda x: x['score'], reverse=True)
-        prev_score = None
-        prev_rank = 0
-        for idx, user in enumerate(all_users, start=1):
-            if user['score'] != prev_score:
-                prev_rank = idx
-                prev_score = user['score']
-            user['rank'] = prev_rank
-
-        # Запись на лист Leaderboard
-        total_score = sum(u['score'] for u in all_users)
+        # --- Создание листов ---
+        total_score = sum(u['score'] for u in all_users_map.values())
         total_prize = 5000
 
+        def create_and_fill_sheet(sheet_name, users_list):
+            create_sheet(sheet_name)
+            clear_sheet(sheet_name)
+            users_ranked = assign_ranks(users_list)
+            rows = prepare_data_for_sheet(users_ranked)
+            write_data_to_sheet(rows, sheet_name)
+            # Формула для распределения призов
+            formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
+            sheet.values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"{sheet_name}!D2",
+                valueInputOption='USER_ENTERED',
+                body={'values': [[formula]]}
+            ).execute()
+
+        # Отдельные листы
+        create_and_fill_sheet("Piracy", type_users_map["piracy"])
+        create_and_fill_sheet("Governance", type_users_map["governance"])
+
+        # Общий Leaderboard
+        all_users = assign_ranks(list(all_users_map.values()))
         create_sheet("Leaderboard")
         clear_sheet("Leaderboard")
         rows = prepare_data_for_sheet(all_users)
         write_data_to_sheet(rows, "Leaderboard")
-
         formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
         sheet.values().update(
             spreadsheetId=SPREADSHEET_ID,
@@ -167,7 +192,7 @@ def fetch_leaderboard():
             body={'values': [[formula]]}
         ).execute()
 
-        print("Leaderboard обновлён!")
+        print("Лидерборды обновлены!")
 
     except Exception as e:
         print(f"Ошибка: {e}")
