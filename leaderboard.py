@@ -2,16 +2,13 @@ import os
 import requests
 import time
 import json
-import threading
-from datetime import datetime, timezone
 import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# --- Конфигурация Google Sheets ---
 SPREADSHEET_ID = '1aJUkWXhvv75WzZq4CaULUgrqsguxYuEahLzORJKW5VY'
 
-# --- Авторизация через секрет GitHub ---
+# Авторизация через секрет GitHub
 service_account_info = json.loads(os.environ['SERVICE_ACCOUNT_JSON'])
 credentials = service_account.Credentials.from_service_account_info(
     service_account_info,
@@ -20,7 +17,6 @@ credentials = service_account.Credentials.from_service_account_info(
 service = build('sheets', 'v4', credentials=credentials)
 sheet = service.spreadsheets()
 
-# === УТИЛИТЫ ===
 def normalize_username(name):
     return re.sub(r'\s+', ' ', name.strip()).lower()
 
@@ -106,16 +102,13 @@ def prepare_data_for_sheet(users):
         rows.append([u['rank'], u['displayname'], u['score']])
     return rows
 
-# === ОСНОВНАЯ ЛОГИКА ===
 def fetch_leaderboard():
     base_url = "https://api.kap.gg/games/leaderboard/doubloons/"
     types = ["piracy", "governance"]
     limit = 50
-
     all_users_map = {}
 
     try:
-        # --- Загрузка данных ---
         for lb_type in types:
             offset = 0
             while True:
@@ -147,7 +140,6 @@ def fetch_leaderboard():
                 offset += limit
                 time.sleep(0.2)
 
-        # --- Сортировка и ранги ---
         all_users = sorted(all_users_map.values(), key=lambda x: x['score'], reverse=True)
         prev_score = None
         prev_rank = 0
@@ -157,14 +149,11 @@ def fetch_leaderboard():
                 prev_score = user['score']
             user['rank'] = prev_rank
 
-        # --- Общая сумма очков для $ ---
         total_score = sum(u['score'] for u in all_users)
         total_prize = 5000
-
         piracy_users = [u for u in all_users if u['type']=='piracy']
         governance_users = [u for u in all_users if u['type']=='governance']
 
-        # --- Функция записи листа ---
         def create_and_fill_sheet(sheet_name, users_list):
             create_sheet(sheet_name)
             clear_sheet(sheet_name)
@@ -181,7 +170,6 @@ def fetch_leaderboard():
         create_and_fill_sheet("Leaderboard", all_users)
         create_and_fill_sheet("Piracy", piracy_users)
         create_and_fill_sheet("Governance", governance_users)
-
         print("Leaderboard обновлён!")
 
     except Exception as e:
