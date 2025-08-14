@@ -1,9 +1,10 @@
 name: Update KAP Leaderboard
 
+# Запуск каждые 10 минут
 on:
   schedule:
-    - cron: "* * * * *"  # каждую минуту
-  workflow_dispatch:      # ручной запуск
+    - cron: "*/10 * * * *"  # каждые 10 минут
+  workflow_dispatch:        # ручной запуск
 
 jobs:
   update-leaderboard:
@@ -26,4 +27,7 @@ jobs:
       - name: Run leaderboard script
         env:
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
-        run: python leaderboard.py
+        run: |
+          echo "=== START SCRIPT ==="
+          python leaderboard.py
+          echo "=== END SCRIPT ==="
