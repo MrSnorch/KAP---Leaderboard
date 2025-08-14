@@ -30,3 +30,4 @@ jobs:
           echo "=== START SCRIPT ==="
           python leaderboard.py
           echo "=== END SCRIPT ==="
+ 
