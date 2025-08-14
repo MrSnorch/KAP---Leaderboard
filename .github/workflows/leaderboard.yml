@@ -1,9 +1,8 @@
 name: Update KAP Leaderboard
 
+# Оставляем только ручной запуск
 on:
-  schedule:
-    - cron: "*/10 * * * *"  # запуск каждые 10 минут
-  workflow_dispatch:        # ручной запуск
+  workflow_dispatch:
 
 jobs:
   update-leaderboard:
@@ -30,4 +29,3 @@ jobs:
           echo "=== START SCRIPT ==="
           python leaderboard.py
           echo "=== END SCRIPT ==="
- 
