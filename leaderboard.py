@@ -160,14 +160,17 @@ def fetch_leaderboard():
         total_prize = 5000
 
         def create_and_fill_sheet(sheet_name, users_list, score_key):
+            # Фильтруем только тех, у кого score > 0 для конкретного лидерборда
+            users_list = [u for u in users_list if u[score_key] > 0]
+            if not users_list:
+                return
             create_sheet(sheet_name)
             clear_sheet(sheet_name)
             users_ranked = assign_ranks(users_list, score_key)
             for u in users_ranked:
-                u['score'] = u[score_key]  # отображаем соответствующий score
+                u['score'] = u[score_key]  # отображаем score соответствующего типа
             rows = prepare_data_for_sheet(users_ranked)
             write_data_to_sheet(rows, sheet_name)
-            # Формула для доли от общего призового фонда
             formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
             sheet.values().update(
                 spreadsheetId=SPREADSHEET_ID,
@@ -178,9 +181,9 @@ def fetch_leaderboard():
 
         # Leaderboard – общий
         create_and_fill_sheet("Leaderboard", all_users, 'score')
-        # Piracy – отдельные ранги
+        # Piracy – отдельные ранги, только с ненулевыми дублонами
         create_and_fill_sheet("Piracy", all_users, 'piracy')
-        # Governance – отдельные ранги
+        # Governance – отдельные ранги, только с ненулевыми дублонами
         create_and_fill_sheet("Governance", all_users, 'governance')
 
         print("Leaderboard обновлён!")
