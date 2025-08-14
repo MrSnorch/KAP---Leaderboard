@@ -106,6 +106,56 @@ def assign_ranks(users):
         user['rank'] = prev_rank
     return users_sorted
 
+def apply_formatting(sheet_name):
+    # Сделаем ширину столбцов одинаковой с Leaderboard
+    requests_body = {
+        "requests": [
+            {"updateDimensionProperties": {
+                "range": {
+                    "sheetId": get_sheet_id(sheet_name),
+                    "dimension": "COLUMNS",
+                    "startIndex": 0,
+                    "endIndex": 4
+                },
+                "properties": {"pixelSize": 150},
+                "fields": "pixelSize"
+            }},
+            # Заголовки жирным
+            {"repeatCell": {
+                "range": {
+                    "sheetId": get_sheet_id(sheet_name),
+                    "startRowIndex": 0,
+                    "endRowIndex": 1
+                },
+                "cell": {
+                    "userEnteredFormat": {"textFormat": {"bold": True}}
+                },
+                "fields": "userEnteredFormat.textFormat.bold"
+            }},
+            # Выравнивание по центру для всех ячеек
+            {"repeatCell": {
+                "range": {
+                    "sheetId": get_sheet_id(sheet_name)
+                },
+                "cell": {
+                    "userEnteredFormat": {"horizontalAlignment": "CENTER"}
+                },
+                "fields": "userEnteredFormat.horizontalAlignment"
+            }}
+        ]
+    }
+    try:
+        service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body=requests_body).execute()
+    except Exception as e:
+        print(f"Ошибка форматирования листа {sheet_name}: {e}")
+
+def get_sheet_id(sheet_name):
+    spreadsheet = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    for s in spreadsheet['sheets']:
+        if s['properties']['title'] == sheet_name:
+            return s['properties']['sheetId']
+    return None
+
 def fetch_leaderboard():
     base_url = "https://api.kap.gg/games/leaderboard/doubloons/"
     types = ["piracy", "governance"]
@@ -173,6 +223,7 @@ def fetch_leaderboard():
                 valueInputOption='USER_ENTERED',
                 body={'values': [[formula]]}
             ).execute()
+            apply_formatting(sheet_name)  # Применяем одинаковое форматирование
 
         # Отдельные листы
         create_and_fill_sheet("Piracy", type_users_map["piracy"])
@@ -180,19 +231,9 @@ def fetch_leaderboard():
 
         # Общий Leaderboard
         all_users = assign_ranks(list(all_users_map.values()))
-        create_sheet("Leaderboard")
-        clear_sheet("Leaderboard")
-        rows = prepare_data_for_sheet(all_users)
-        write_data_to_sheet(rows, "Leaderboard")
-        formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
-        sheet.values().update(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"Leaderboard!D2",
-            valueInputOption='USER_ENTERED',
-            body={'values': [[formula]]}
-        ).execute()
+        create_and_fill_sheet("Leaderboard", all_users)
 
-        print("Лидерборды обновлены!")
+        print("Лидерборды обновлены с форматированием!")
 
     except Exception as e:
         print(f"Ошибка: {e}")
