@@ -102,90 +102,17 @@ def prepare_data_for_sheet(users):
         rows.append([u['rank'], u['displayname'], u['score']])
     return rows
 
-def apply_formatting(sheet_name):
-    sheet_id = get_sheet_id(sheet_name)
-    if sheet_id is None:
-        print(f"Не найден лист {sheet_name} для форматирования")
-        return
-
-    requests_body = {
-        "requests": [
-            # Установка ширины столбцов
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 4},
-                "properties": {"pixelSize": 150},
-                "fields": "pixelSize"
-            }},
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1},
-                "properties": {"pixelSize": 70}, "fields": "pixelSize"
-            }},
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 1, "endIndex": 2},
-                "properties": {"pixelSize": 300}, "fields": "pixelSize"
-            }},
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 2, "endIndex": 3},
-                "properties": {"pixelSize": 140}, "fields": "pixelSize"
-            }},
-            {"updateDimensionProperties": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 3, "endIndex": 4},
-                "properties": {"pixelSize": 120}, "fields": "pixelSize"
-            }},
-            # Заголовки жирные и с серым фоном
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
-                "cell": {
-                    "userEnteredFormat": {
-                        "textFormat": {"bold": True},
-                        "backgroundColor": {"red": 0.94, "green": 0.94, "blue": 0.94},
-                        "horizontalAlignment": "CENTER",
-                        "verticalAlignment": "MIDDLE"
-                    }
-                },
-                "fields": "userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)"
-            }},
-            # Выравнивание всех ячеек по вертикали
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1},
-                "cell": {"userEnteredFormat": {"verticalAlignment": "MIDDLE"}},
-                "fields": "userEnteredFormat.verticalAlignment"
-            }},
-            # Выравнивание столбцов
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1},
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                "fields": "userEnteredFormat.horizontalAlignment"
-            }},
-            # Nicknames – слева, Doubloons и $ – справа
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 1, "endColumnIndex": 2},
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT"}},
-                "fields": "userEnteredFormat.horizontalAlignment"
-            }},
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 2, "endColumnIndex": 4},
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT"}},
-                "fields": "userEnteredFormat.horizontalAlignment"
-            }},
-            # Формат чисел
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 2, "endColumnIndex": 4},
-                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
-                "fields": "userEnteredFormat.numberFormat"
-            }},
-            {"repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": 3, "endColumnIndex": 4},
-                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0.00"}}},
-                "fields": "userEnteredFormat.numberFormat"
-            }}
-        ]
-    }
-
-    try:
-        service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body=requests_body).execute()
-    except Exception as e:
-        print(f"Ошибка форматирования листа {sheet_name}: {e}")
+def assign_ranks(users, score_key):
+    users_sorted = sorted(users, key=lambda x: x[score_key], reverse=True)
+    prev_score = None
+    prev_rank = 0
+    for idx, user in enumerate(users_sorted, start=1):
+        score = user[score_key]
+        if score != prev_score:
+            prev_rank = idx
+            prev_score = score
+        user['rank'] = prev_rank
+    return users_sorted
 
 def fetch_leaderboard():
     base_url = "https://api.kap.gg/games/leaderboard/doubloons/"
@@ -212,63 +139,51 @@ def fetch_leaderboard():
                     if not name:
                         continue
                     norm_name = normalize_username(name)
-                    if norm_name in all_users_map:
-                        all_users_map[norm_name]['score'] += score
-                        all_users_map[norm_name][lb_type] = score
-                    else:
+                    if norm_name not in all_users_map:
                         all_users_map[norm_name] = {
                             "displayname": name,
-                            "score": score,
-                            "piracy": score if lb_type=="piracy" else 0,
-                            "governance": score if lb_type=="governance" else 0
+                            "piracy": 0,
+                            "governance": 0
                         }
+                    all_users_map[norm_name][lb_type] += score
                 if len(users) < limit:
                     break
                 offset += limit
                 time.sleep(0.2)
 
-        all_users = sorted(all_users_map.values(), key=lambda x: x['score'], reverse=True)
-        prev_score = None
-        prev_rank = 0
-        for idx, user in enumerate(all_users, start=1):
-            if user['score'] != prev_score:
-                prev_rank = idx
-                prev_score = user['score']
-            user['rank'] = prev_rank
+        all_users = []
+        for u in all_users_map.values():
+            u['score'] = u['piracy'] + u['governance']
+            all_users.append(u)
 
         total_score = sum(u['score'] for u in all_users)
         total_prize = 5000
 
-        def create_and_fill_sheet(sheet_name, users_list):
+        def create_and_fill_sheet(sheet_name, users_list, score_key):
             create_sheet(sheet_name)
             clear_sheet(sheet_name)
-            rows = prepare_data_for_sheet(users_list)
+            users_ranked = assign_ranks(users_list, score_key)
+            for u in users_ranked:
+                u['score'] = u[score_key]  # отображаем соответствующий score
+            rows = prepare_data_for_sheet(users_ranked)
             write_data_to_sheet(rows, sheet_name)
-            # Добавляем формулу $ для всех пользователей
-            formula_range = f"{sheet_name}!D2:D{len(users_list)+1}"
+            # Формула для доли от общего призового фонда
             formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
             sheet.values().update(
                 spreadsheetId=SPREADSHEET_ID,
-                range=formula_range,
+                range=f"{sheet_name}!D2",
                 valueInputOption='USER_ENTERED',
                 body={'values': [[formula]]}
             ).execute()
-            apply_formatting(sheet_name)
 
-        # Leaderboard – общее
-        create_and_fill_sheet("Leaderboard", all_users)
-        # Piracy
-        piracy_users = sorted(all_users, key=lambda x: x['piracy'], reverse=True)
-        for u in piracy_users:
-            u['score'] = u['piracy']
-        create_and_fill_sheet("Piracy", piracy_users)
-        # Governance
-        governance_users = sorted(all_users, key=lambda x: x['governance'], reverse=True)
-        for u in governance_users:
-            u['score'] = u['governance']
-        create_and_fill_sheet("Governance", governance_users)
+        # Leaderboard – общий
+        create_and_fill_sheet("Leaderboard", all_users, 'score')
+        # Piracy – отдельные ранги
+        create_and_fill_sheet("Piracy", all_users, 'piracy')
+        # Governance – отдельные ранги
+        create_and_fill_sheet("Governance", all_users, 'governance')
 
-        print("Leaderboard, Piracy и Governance обновлены и красиво отформатированы!")
+        print("Leaderboard обновлён!")
 
     except Exception as e:
         print(f"Ошибка: {e}")
