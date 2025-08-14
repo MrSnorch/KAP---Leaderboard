@@ -1,10 +1,9 @@
 name: Update KAP Leaderboard
 
-# Запуск каждые 1 минуту
 on:
   schedule:
     - cron: "* * * * *"  # каждую минуту
-  workflow_dispatch:      # для ручного запуска
+  workflow_dispatch:      # ручной запуск
 
 jobs:
   update-leaderboard:
