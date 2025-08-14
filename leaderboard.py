@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 
 SPREADSHEET_ID = '1aJUkWXhvv75WzZq4CaULUgrqsguxYuEahLzORJKW5VY'
 
-# Авторизация через секрет GitHub
+# Авторизация через сервисный аккаунт
 service_account_info = json.loads(os.environ['SERVICE_ACCOUNT_JSON'])
 credentials = service_account.Credentials.from_service_account_info(
     service_account_info,
@@ -109,6 +109,7 @@ def fetch_leaderboard():
     all_users_map = {}
 
     try:
+        # Сбор всех пользователей
         for lb_type in types:
             offset = 0
             while True:
@@ -132,14 +133,14 @@ def fetch_leaderboard():
                     else:
                         all_users_map[norm_name] = {
                             "displayname": name,
-                            "score": score,
-                            "type": lb_type
+                            "score": score
                         }
                 if len(users) < limit:
                     break
                 offset += limit
                 time.sleep(0.2)
 
+        # Сортировка и ранжирование
         all_users = sorted(all_users_map.values(), key=lambda x: x['score'], reverse=True)
         prev_score = None
         prev_rank = 0
@@ -149,27 +150,23 @@ def fetch_leaderboard():
                 prev_score = user['score']
             user['rank'] = prev_rank
 
+        # Запись на лист Leaderboard
         total_score = sum(u['score'] for u in all_users)
         total_prize = 5000
-        piracy_users = [u for u in all_users if u['type']=='piracy']
-        governance_users = [u for u in all_users if u['type']=='governance']
 
-        def create_and_fill_sheet(sheet_name, users_list):
-            create_sheet(sheet_name)
-            clear_sheet(sheet_name)
-            rows = prepare_data_for_sheet(users_list)
-            write_data_to_sheet(rows, sheet_name)
-            formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
-            sheet.values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"{sheet_name}!D2",
-                valueInputOption='USER_ENTERED',
-                body={'values': [[formula]]}
-            ).execute()
+        create_sheet("Leaderboard")
+        clear_sheet("Leaderboard")
+        rows = prepare_data_for_sheet(all_users)
+        write_data_to_sheet(rows, "Leaderboard")
 
-        create_and_fill_sheet("Leaderboard", all_users)
-        create_and_fill_sheet("Piracy", piracy_users)
-        create_and_fill_sheet("Governance", governance_users)
+        formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
+        sheet.values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"Leaderboard!D2",
+            valueInputOption='USER_ENTERED',
+            body={'values': [[formula]]}
+        ).execute()
+
         print("Leaderboard обновлён!")
 
     except Exception as e:
