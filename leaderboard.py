@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 
 SPREADSHEET_ID = '1aJUkWXhvv75WzZq4CaULUgrqsguxYuEahLzORJKW5VY'
 
-# Авторизация через секрет GitHub
+# Авторизация через сервисный аккаунт
 service_account_info = json.loads(os.environ['SERVICE_ACCOUNT_JSON'])
 credentials = service_account.Credentials.from_service_account_info(
     service_account_info,
@@ -102,71 +102,6 @@ def prepare_data_for_sheet(users):
         rows.append([u['rank'], u['displayname'], u['score']])
     return rows
 
-def apply_formatting(sheet_name):
-    sheet_id = get_sheet_id(sheet_name)
-    if sheet_id is None:
-        return
-    requests_body = {
-        "requests": [
-            # Ширина столбцов
-            {"updateDimensionProperties": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "dimension": "COLUMNS",
-                    "startIndex": 0,
-                    "endIndex": 4
-                },
-                "properties": {"pixelSize": 150},
-                "fields": "pixelSize"
-            }},
-            # Заголовки жирным
-            {"repeatCell": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 0,
-                    "endRowIndex": 1
-                },
-                "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
-                "fields": "userEnteredFormat.textFormat.bold"
-            }},
-            # Выравнивание столбцов
-            {"repeatCell": {  # Rank — центр
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 1,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": 1
-                },
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                "fields": "userEnteredFormat.horizontalAlignment"
-            }},
-            {"repeatCell": {  # Nicknames — влево
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 1,
-                    "startColumnIndex": 1,
-                    "endColumnIndex": 2
-                },
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT"}},
-                "fields": "userEnteredFormat.horizontalAlignment"
-            }},
-            {"repeatCell": {  # Doubloons и $ — вправо
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 1,
-                    "startColumnIndex": 2,
-                    "endColumnIndex": 4
-                },
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT"}},
-                "fields": "userEnteredFormat.horizontalAlignment"
-            }}
-        ]
-    }
-    try:
-        service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body=requests_body).execute()
-    except Exception as e:
-        print(f"Ошибка форматирования листа {sheet_name}: {e}")
-
 def fetch_leaderboard():
     base_url = "https://api.kap.gg/games/leaderboard/doubloons/"
     types = ["piracy", "governance"]
@@ -174,6 +109,7 @@ def fetch_leaderboard():
     all_users_map = {}
 
     try:
+        # Сбор всех пользователей
         for lb_type in types:
             offset = 0
             while True:
@@ -193,71 +129,43 @@ def fetch_leaderboard():
                         continue
                     norm_name = normalize_username(name)
                     if norm_name in all_users_map:
-                        all_users_map[norm_name]['scores'][lb_type] = score
+                        all_users_map[norm_name]['score'] += score
                     else:
                         all_users_map[norm_name] = {
                             "displayname": name,
-                            "scores": {lb_type: score}
+                            "score": score
                         }
                 if len(users) < limit:
                     break
                 offset += limit
                 time.sleep(0.2)
 
-        # Собираем все значения
-        all_users = []
-        piracy_users = []
-        governance_users = []
-        for user in all_users_map.values():
-            piracy_score = user['scores'].get('piracy', 0)
-            governance_score = user['scores'].get('governance', 0)
-            total_score = piracy_score + governance_score
-            all_users.append({
-                'displayname': user['displayname'],
-                'score': total_score,
-                'piracy': piracy_score,
-                'governance': governance_score
-            })
-            piracy_users.append({'displayname': user['displayname'], 'score': piracy_score})
-            governance_users.append({'displayname': user['displayname'], 'score': governance_score})
-
         # Сортировка и ранжирование
-        def rank_users(users):
-            users_sorted = sorted(users, key=lambda x: x['score'], reverse=True)
-            prev_score = None
-            prev_rank = 0
-            for idx, u in enumerate(users_sorted, start=1):
-                if u['score'] != prev_score:
-                    prev_rank = idx
-                    prev_score = u['score']
-                u['rank'] = prev_rank
-            return users_sorted
+        all_users = sorted(all_users_map.values(), key=lambda x: x['score'], reverse=True)
+        prev_score = None
+        prev_rank = 0
+        for idx, user in enumerate(all_users, start=1):
+            if user['score'] != prev_score:
+                prev_rank = idx
+                prev_score = user['score']
+            user['rank'] = prev_rank
 
-        all_users = rank_users(all_users)
-        piracy_users = rank_users([u for u in piracy_users if u['score'] > 0])
-        governance_users = rank_users([u for u in governance_users if u['score'] > 0])
-
-        # Призовой фонд
+        # Запись на лист Leaderboard
+        total_score = sum(u['score'] for u in all_users)
         total_prize = 5000
-        total_piracy = sum(u['score'] for u in piracy_users)
-        total_governance = sum(u['score'] for u in governance_users)
 
-        def create_and_fill_sheet(sheet_name, users_list, total_score):
-            create_sheet(sheet_name)
-            clear_sheet(sheet_name)
-            rows = prepare_data_for_sheet(users_list)
-            write_data_to_sheet(rows, sheet_name)
-            # Формула для доли в $ (в отдельном столбце)
-            for i, u in enumerate(users_list, start=2):
-                user_score = u['score']
-                prize = round((user_score / total_score) * total_prize, 2) if total_score else 0
-                write_data_to_sheet([[prize]], sheet_name, start_row=i)
-            apply_formatting(sheet_name)
+        create_sheet("Leaderboard")
+        clear_sheet("Leaderboard")
+        rows = prepare_data_for_sheet(all_users)
+        write_data_to_sheet(rows, "Leaderboard")
 
-        # Заполнение листов
-        create_and_fill_sheet("Leaderboard", all_users, sum(u['score'] for u in all_users))
-        create_and_fill_sheet("Piracy", piracy_users, total_piracy)
-        create_and_fill_sheet("Governance", governance_users, total_governance)
+        formula = f'=ARRAYFORMULA(ЕСЛИ(ЕЧИСЛО(C2:C); ОКРУГЛ((C2:C / {total_score}) * {total_prize}; 2); ""))'
+        sheet.values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"Leaderboard!D2",
+            valueInputOption='USER_ENTERED',
+            body={'values': [[formula]]}
+        ).execute()
 
         print("Leaderboard обновлён!")
 
